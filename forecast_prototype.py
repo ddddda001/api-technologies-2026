@@ -21,7 +21,7 @@ params = {
     'from': start.isoformat(),
     'to': end.isoformat()
 }
-
+url_servers = 'https://api.external-services.dataprosvet.ru/monitoring/v1/servers'
 
 backoff = {'1': 5, '2' : 10, '3': 0}
 
@@ -52,7 +52,7 @@ def check_metrics(metrics_response,server, params=params):
                         return None
             else:
                 print(f'Expected 30 data points, but got {len(metrics["points"])} for server {server["serverId"]}')
-                return None        
+                return None
 
 #---Проверяет и готовит признаки для модели ----
 def get_metrics_all(metrics,server,name):
@@ -115,23 +115,33 @@ def get_with_retry(URL,params):
             print(f'URL: {URL} Error: {response.status_code} attempt: {attempt}')
             return None
 
+def predict_server_metrics(metrics,server,horizon,mode,art):
+    g={}
+    for name in ('cpu', 'ram', 'disk'):
+        data = get_metrics_all(metrics, server, name)
+        if data is not None:
+            g[name] = predict(data, art, horizon, mode)
+    return g
+
+def get_server_history(server):
+        url_metrics = f'{url_servers}/{server["serverId"]}/metrics'
+        metrics_response = get_with_retry(url_metrics,params)
+        if metrics_response is not None:
+            result = check_metrics(metrics_response,server)
+            return result
+        return None
+
 def main():
     art = get_art()
-    url_servers = 'https://api.external-services.dataprosvet.ru/monitoring/v1/servers'
+    data={}
     servers_response = get_with_retry(url_servers,None)
     if servers_response is not None:
         servers = servers_response.json()
         for server in servers:
-                    url_metrics = f'{url_servers}/{server["serverId"]}/metrics'
-                    metrics_response = get_with_retry(url_metrics,params)
-                    if metrics_response is not None:
-                        result = check_metrics(metrics_response,server)
-                        if result is not None:
-                            metrics = result
-                            for name in ('cpu', 'ram', 'disk'):
-                                data = get_metrics_all(metrics, server, name)
-                                if data is not None:
-                                    print(server["serverId"], name, round(predict(data, art, '1m', 'peak'), 2))
+            result = get_server_history(server=server)
+            if result is not None:
+                metrics = result
+                data[server["serverId"]] = predict_server_metrics(metrics=metrics,server=server,horizon='1m',mode='peak',art=art)
 if __name__ == "__main__":
     main()
 

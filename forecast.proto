@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+message RequestPredict
+{
+  string serverID = 1;
+  string horizon =2 ;
+  string mode = 3;
+}
+
+message ForecastPredict
+{
+    double values_cpu = 1;
+    double values_ram = 2;
+    double values_disk = 3;
+}
+
+service ForecastService
+{
+  rpc Request(RequestPredict) returns (ForecastPredict);
+}
