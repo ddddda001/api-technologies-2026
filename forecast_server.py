@@ -45,7 +45,6 @@ class ForecastService(ForecastServiceServicer):
                     result = read_daily_history(cur, request.serverID, start_day, end_day)
         except psycopg.OperationalError:
             context.abort(grpc.StatusCode.UNAVAILABLE, 'Database is unavailable')
-
         if result is not None:
             data = predict_server_metrics(server = server,horizon = horizon, art=self.art, mode = mode, metrics = result)
         else:

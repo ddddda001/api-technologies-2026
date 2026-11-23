@@ -131,3 +131,51 @@ git lfs ls-files
 ### Изменения архитектуры относительно ДЗ 1
 
 Контейнерная диаграмма приведена в соответствие с описанием в этом README: на неё добавлены Kafka и Stream Processor (Apache Flink). Metrics Collector больше не пишет в хранилища напрямую. Подробности — в `api-design.md`.
+
+## Домашнее задание 4. Локальный запуск
+
+Скопируйте `.env.example` в `.env`. В `API_KEY` укажите ключ команды, в `POSTGRES_PASSWORD` — пароль локальной базы, в `AGENT_API_KEY` — ключ Collector, а в `API_LOGIN_PASSWORD` — пароль для входа в REST API длиной от 8 символов. Положите выданную модель `capacity-forecast-v1.dill` в корень репозитория или задайте её путь через `MODEL_PATH`.
+
+```bash
+docker compose up --build
+```
+
+Загрузчик применяет SQL-миграции, получает из Monitoring API список ИС и серверов и сохраняет доступные дневные точки за год. Повторный запуск сохраняет те же записи. После загрузки Monitoring Agent раз в минуту передаёт свежие замеры в Collector. Collector возвращает `202` после подтверждения Kafka, а Consumer записывает историю в TimescaleDB и обновляет последний замер в Redis.
+
+Forecast Service читает 30 последних полных суток UTC. Forecast Worker сохраняет прогнозы `mean` и `peak` для четырёх горизонтов. Горизонт `1d` пересчитывается раз в минуту, остальные — раз в сутки. REST API отдаёт `peak` из базы и возвращает `pending` до первого расчёта. Alert Worker сверяет сохранённые пики на `1d` и `1m` с настроенными порогами. Пока превышение активно, для него отправляется одно письмо и один push.
+
+В ДЗ 4 вместо Flink используется Python-консьюмер. Расчёт вынесен в [gRPC-сервис](forecast.proto), TimescaleDB хранит дневные агрегаты и минуты, а Redis — последние замеры. История с шагом `raw` или `hourly` начинается с запуска агента. Схема реализации приведена на [контейнерной диаграмме](architecture/container.png).
+
+### Компоненты проекта
+
+| Участник по рабочему плану | Компонент |
+|---|---|
+| Яна | Monitoring Agent |
+| Даша | Collector, Kafka, Consumer, Redis, TimescaleDB и начальная загрузка |
+| Данил | Forecast Service и Forecast Worker |
+| Саша | REST API, Alert Worker и Compose |
+
+| Сервис | Порт |
+|---|---|
+| REST API | `127.0.0.1:8080`, меняется через `API_PORT` |
+| Metrics Collector | `127.0.0.1:8081`, меняется через `COLLECTOR_PORT` |
+| Forecast Service, gRPC | `127.0.0.1:50051`, меняется через `FORECAST_PORT` |
+| TimescaleDB | `5432` внутри сети Compose |
+| Kafka | `9092` внутри сети Compose |
+| Redis | `6379` внутри сети Compose |
+
+После запуска можно запросить прогноз для `srv-001` встроенным клиентом.
+
+```bash
+docker compose exec forecast-service python forecast_client.py
+```
+
+В контрольном запуске 23 ноября 2026 года загрузчик записал 14 541 строку дневных метрик по 40 серверам. Число загруженных строк можно проверить SQL-запросом.
+
+```bash
+docker compose exec timescaledb sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT count(*) FROM server_daily_metrics"'
+```
+
+### Демо
+
+`./scripts/demo.sh` использует Python 3 и настройки из `.env`. Скрипт проверяет свежие замеры, 30 дневных точек `srv-001`, четыре прогноза `srv-023`, задаёт пороги 80%, ждёт email и push в Notify API и проверяет повторный цикл на дубли. Итог записывается в `demo-result.json`. Для проверки устойчивости можно задать `MOCK_SCENARIO` при запуске стека.

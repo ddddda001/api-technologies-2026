@@ -1,4 +1,4 @@
-CREATE TABLE server_daily_metrics (
+CREATE TABLE IF NOT EXISTS server_daily_metrics (
     server_id text,
     day date,
     cpu_percent float,

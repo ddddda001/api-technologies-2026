@@ -1,0 +1,215 @@
+x-app-image: &app-image
+  image: localhost/capacity-forecast-app:local
+  pull_policy: never
+
+x-db-client-environment: &db-client-environment
+  DATABASE_URL: host=timescaledb
+  PGDATABASE: ${POSTGRES_DB:-capacity_forecast}
+  PGUSER: ${POSTGRES_USER:-capacity_forecast}
+  PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+
+x-monitoring-environment: &monitoring-environment
+  API_KEY: ${API_KEY:?Set API_KEY in .env}
+  MOCK_SCENARIO: ${MOCK_SCENARIO:-}
+  MONITORING_URL: ${MONITORING_URL:-https://api.external-services.dataprosvet.ru/monitoring}
+
+x-worker-healthcheck: &worker-healthcheck
+  test: [CMD, python, -c, 'from pathlib import Path; import time; assert time.time() - Path("/tmp/capacity-heartbeat").stat().st_mtime < 180']
+  interval: 15s
+  timeout: 3s
+  retries: 5
+
+services:
+  timescaledb:
+    image: docker.io/timescale/timescaledb:2.32.1-pg18-oss
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-capacity_forecast}
+      POSTGRES_USER: ${POSTGRES_USER:-capacity_forecast}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      PGDATA: /pgdata
+      TS_TUNE_MEMORY: 512MB
+      TS_TUNE_NUM_CPUS: '2'
+    volumes:
+      - timescaledb-data:/pgdata
+    mem_limit: 768m
+    shm_size: 128m
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: docker.io/library/redis:7.4-alpine
+    command: [redis-server, --appendonly, 'yes']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+
+  kafka:
+    image: docker.io/apache/kafka:4.1.0
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: '1'
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1'
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: '1'
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: '0'
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_NUM_PARTITIONS: '3'
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx256m
+    mem_limit: 768m
+    volumes:
+      - kafka-data:/tmp/kraft-combined-logs
+    healthcheck:
+      test: [CMD, /opt/kafka/bin/kafka-topics.sh, --bootstrap-server, 'localhost:9092', --list]
+      interval: 10s
+      timeout: 7s
+      retries: 12
+
+  history-loader:
+    <<: *app-image
+    build: .
+    command: [python, load_daily_metrics.py]
+    environment:
+      <<: [*db-client-environment, *monitoring-environment]
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: 'on-failure:3'
+
+  collector:
+    <<: *app-image
+    command: [uvicorn, metrics_collector:app, --host, 0.0.0.0, --port, '8081']
+    environment:
+      AGENT_API_KEY: ${AGENT_API_KEY:?Set AGENT_API_KEY in .env}
+    ports:
+      - '127.0.0.1:${COLLECTOR_PORT:-8081}:8081'
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, 'from urllib.request import urlopen; urlopen("http://localhost:8081/health", timeout=3)']
+      interval: 5s
+      timeout: 4s
+      retries: 15
+
+  metrics-consumer:
+    <<: *app-image
+    command: [python, metrics_consumer.py]
+    environment: *db-client-environment
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      history-loader:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck: *worker-healthcheck
+
+  monitoring-agent:
+    <<: *app-image
+    command: [python, monitoring_agent.py]
+    environment:
+      <<: *monitoring-environment
+      AGENT_API_KEY: ${AGENT_API_KEY:?Set AGENT_API_KEY in .env}
+      MONITORING_INTERVAL_SECONDS: ${MONITORING_INTERVAL_SECONDS:-60}
+    depends_on:
+      collector:
+        condition: service_healthy
+      history-loader:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck: *worker-healthcheck
+
+  forecast-service:
+    <<: *app-image
+    command: [python, forecast_server.py]
+    environment: *db-client-environment
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      history-loader:
+        condition: service_completed_successfully
+    ports:
+      - '127.0.0.1:${FORECAST_PORT:-50051}:50051'
+    volumes:
+      - type: bind
+        source: ${MODEL_PATH:-./capacity-forecast-v1.dill}
+        target: /app/capacity-forecast-v1.dill
+        read_only: true
+        bind:
+          create_host_path: false
+          selinux: z
+    healthcheck:
+      test: [CMD, python, -c, 'import grpc; channel = grpc.insecure_channel("localhost:50051"); grpc.channel_ready_future(channel).result(timeout=2)']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  forecast-worker:
+    <<: *app-image
+    command: [python, forecast_worker.py]
+    environment:
+      <<: *db-client-environment
+      FORECAST_INTERVAL_SECONDS: ${FORECAST_INTERVAL_SECONDS:-60}
+    depends_on:
+      forecast-service:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck: *worker-healthcheck
+
+  api:
+    <<: *app-image
+    command: [uvicorn, api_service:app, --host, 0.0.0.0, --port, '8080']
+    environment:
+      <<: *db-client-environment
+      API_LOGIN_EMAIL: ${API_LOGIN_EMAIL:-engineer@example.com}
+      API_LOGIN_PASSWORD: ${API_LOGIN_PASSWORD:?Set API_LOGIN_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:-}
+    ports:
+      - '127.0.0.1:${API_PORT:-8080}:8080'
+    depends_on:
+      redis:
+        condition: service_healthy
+      history-loader:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -c, 'from urllib.request import urlopen; urlopen("http://localhost:8080/health", timeout=3)']
+      interval: 5s
+      timeout: 4s
+      retries: 15
+
+  alert-worker:
+    <<: *app-image
+    command: [python, alert_worker.py]
+    environment:
+      <<: [*db-client-environment, *monitoring-environment]
+      NOTIFY_URL: ${NOTIFY_URL:-https://api.external-services.dataprosvet.ru/notify}
+      ALERT_EMAIL: ${ALERT_EMAIL:-engineer@example.com}
+      ALERT_PUSH_TOKEN: ${ALERT_PUSH_TOKEN:-}
+      ALERT_PUSH_TOPIC: ${ALERT_PUSH_TOPIC:-capacity-forecast}
+      ALERT_INTERVAL_SECONDS: ${ALERT_INTERVAL_SECONDS:-15}
+    depends_on:
+      forecast-worker:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck: *worker-healthcheck
+
+volumes:
+  timescaledb-data:
+  kafka-data:
+  redis-data:

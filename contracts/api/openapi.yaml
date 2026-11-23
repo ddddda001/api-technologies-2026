@@ -313,7 +313,7 @@ paths:
     delete:
       operationId: deleteServer
       tags: [servers]
-      summary: Удалить сервер (метрики и прогнозы удаляются асинхронно)
+      summary: Удалить сервер, его метрики и прогнозы
       responses:
         "204":
           description: Сервер удалён
@@ -384,11 +384,9 @@ paths:
       tags: [state]
       summary: Текущая (near real-time) загрузка сервера
       description: >
-        Читает последнюю NRT-фичу, посчитанную Stream Processor (Flink) и
-        сохранённую в Hot Store (Redis). Целевое время ответа — до 1 секунды.
-        Данные считаются свежими, если возраст не превышает 2 минуты
-        (удвоенный интервал сбора метрик); при более старых данных API
-        возвращает их с флагом stale=true, а не ошибкой.
+        Читает последний замер из Redis с резервным чтением из TimescaleDB.
+        Данные считаются свежими, если возраст не превышает 2 минуты.
+        До первого замера возвращает stale=true и пустые значения метрик и времени.
       responses:
         "200":
           description: Текущее состояние получено
@@ -406,15 +404,15 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
-          description: Сервер не найден, либо по нему ещё не поступило ни одной метрики
+          description: Сервер не найден
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
               example:
                 error:
-                  code: no_data_yet
-                  message: По серверу ещё не поступило ни одной метрики
+                  code: not_found
+                  message: Сервер не найден
 
   /servers/{serverId}/metrics:
     parameters:
@@ -424,11 +422,9 @@ paths:
       tags: [state]
       summary: История метрик сервера за период
       description: >
-        Отдаёт историю из Data Store (TimescaleDB/PostgreSQL). Данные за
-        последний год хранятся с исходной минутной гранулярностью, поэтому
-        для длинных периодов обязательно используйте агрегацию (resolution)
-        и постраничный обход (cursor) — без этого ответ на годовой период
-        вернул бы сотни тысяч точек за один вызов.
+        Отдаёт историю из TimescaleDB. Начальная загрузка за год хранится с
+        дневной гранулярностью. Разрешения raw и hourly доступны с момента
+        запуска сбора минутных замеров. Для постраничного обхода используется cursor.
       parameters:
         - name: from
           in: query
@@ -504,13 +500,9 @@ paths:
       tags: [forecasts]
       summary: Прогноз нагрузки сервера на заданный горизонт
       description: >
-        Прогноз на горизонте 1 день строится Forecast Worker'ом по NRT-фичам
-        из Hot Store и пересчитывается вместе с их обновлением (минутный
-        цикл). Прогнозы на 1 месяц/6 месяцев/1 год строятся по истории из
-        Data Store более редким батчем (не чаще раза в сутки). Если прогноз
-        для сервера ещё не был построен ни разу, API возвращает 200 со
-        status=pending вместо ошибки, чтобы клиент мог корректно отобразить
-        состояние ожидания. Целевое время ответа — до 1 секунды.
+        Forecast Worker обновляет прогноз на день раз в минуту, остальные
+        горизонты раз в сутки. gRPC-сервис использует 30 полных суток из TimescaleDB.
+        REST возвращает режим peak. До первого расчёта возвращается status=pending.
       parameters:
         - name: horizon
           in: query
@@ -742,17 +734,17 @@ components:
         serverId:
           type: string
         cpuPercent:
-          type: number
+          type: [number, "null"]
         ramPercent:
-          type: number
+          type: [number, "null"]
         diskPercent:
-          type: number
+          type: [number, "null"]
         measuredAt:
-          type: string
+          type: [string, "null"]
           format: date-time
         stale:
           type: boolean
-          description: true, если данные старше 2 минут (двух интервалов сбора)
+          description: true, если данные старше 2 минут или замеров ещё нет
 
     MetricPoint:
       type: object

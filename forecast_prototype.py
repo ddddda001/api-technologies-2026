@@ -7,6 +7,7 @@ load_dotenv()
 headers = {
     'X-API-Key': os.getenv('API_KEY'),
 }
+
 mock_scenario = os.getenv('MOCK_SCENARIO')
 if mock_scenario is not None:
      headers['X-MOCK-SCENARIO'] = mock_scenario
@@ -21,7 +22,8 @@ params = {
     'from': start.isoformat(),
     'to': end.isoformat()
 }
-url_servers = 'https://api.external-services.dataprosvet.ru/monitoring/v1/servers'
+monitoring_url = os.getenv('MONITORING_URL') or 'https://api.external-services.dataprosvet.ru/monitoring'
+url_servers = monitoring_url.rstrip('/') + '/v1/servers'
 
 backoff = {'1': 5, '2' : 10, '3': 0}
 

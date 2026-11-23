@@ -75,6 +75,12 @@ paths:
                 error:
                   code: unauthorized
                   message: Недействительный ключ агента
+        "503":
+          description: Kafka не подтвердила приём замера
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
 components:
   securitySchemes:

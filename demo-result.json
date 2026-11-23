@@ -1,0 +1,120 @@
+{
+  "startedAt": "2026-11-23T02:15:26.587104+00:00",
+  "apiUrl": "http://127.0.0.1:54727",
+  "notificationUrl": "http://127.0.0.1:60239",
+  "servers": 40,
+  "freshServers": 38,
+  "staleServers": [
+    "srv-013",
+    "srv-034"
+  ],
+  "historySrv001": {
+    "points": 30,
+    "first": {
+      "timestamp": "2026-10-24T00:00:00+00:00",
+      "cpuPercent": 34.47,
+      "ramPercent": 38.47,
+      "diskPercent": 50.47
+    },
+    "last": {
+      "timestamp": "2026-11-22T00:00:00+00:00",
+      "cpuPercent": 35.53,
+      "ramPercent": 39.53,
+      "diskPercent": 51.53
+    }
+  },
+  "forecastsSrv023": [
+    {
+      "serverId": "srv-023",
+      "horizon": "1d",
+      "status": "ready",
+      "cpuPercent": 67.81364593999913,
+      "ramPercent": 57.53596580065724,
+      "diskPercent": 70.42285227681359,
+      "generatedAt": "2026-11-23T02:15:21.205188+00:00"
+    },
+    {
+      "serverId": "srv-023",
+      "horizon": "1m",
+      "status": "ready",
+      "cpuPercent": 68.74461613607687,
+      "ramPercent": 58.109822643186405,
+      "diskPercent": 71.35346571368973,
+      "generatedAt": "2026-11-23T02:15:08.110441+00:00"
+    },
+    {
+      "serverId": "srv-023",
+      "horizon": "6m",
+      "status": "ready",
+      "cpuPercent": 68.31281077480551,
+      "ramPercent": 57.73379006407313,
+      "diskPercent": 71.43779073969787,
+      "generatedAt": "2026-11-23T02:15:08.110441+00:00"
+    },
+    {
+      "serverId": "srv-023",
+      "horizon": "1y",
+      "status": "ready",
+      "cpuPercent": 68.95928399391113,
+      "ramPercent": 58.874482418527236,
+      "diskPercent": 72.77457670782856,
+      "generatedAt": "2026-11-23T02:15:08.110441+00:00"
+    }
+  ],
+  "expectedAlertServers": [
+    "srv-004",
+    "srv-005",
+    "srv-006",
+    "srv-009",
+    "srv-010",
+    "srv-012",
+    "srv-014",
+    "srv-015",
+    "srv-019",
+    "srv-020",
+    "srv-024",
+    "srv-025",
+    "srv-026",
+    "srv-027",
+    "srv-030",
+    "srv-033",
+    "srv-035",
+    "srv-036",
+    "srv-040"
+  ],
+  "notifiedServers": [
+    "srv-004",
+    "srv-005",
+    "srv-006",
+    "srv-009",
+    "srv-010",
+    "srv-012",
+    "srv-014",
+    "srv-015",
+    "srv-019",
+    "srv-020",
+    "srv-024",
+    "srv-025",
+    "srv-026",
+    "srv-027",
+    "srv-030",
+    "srv-033",
+    "srv-035",
+    "srv-036",
+    "srv-040"
+  ],
+  "notifications": {
+    "email": 66,
+    "push": 66
+  },
+  "notificationsAfterRecheck": {
+    "email": 66,
+    "push": 66
+  },
+  "ok": true,
+  "finishedAt": "2026-11-23T02:15:38.753633+00:00",
+  "testEnvironment": {
+    "monitoring": "synthetic data following the teaching Monitoring API contract",
+    "notifications": "local stub implementing the teaching contract"
+  }
+}

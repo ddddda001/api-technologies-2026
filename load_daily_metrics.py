@@ -1,8 +1,6 @@
 from forecast_prototype import get_with_retry,url_servers
 import os, psycopg, datetime as dt
 
-
-
 def save_daily_metric(cursor,server_id,point):
     ts = point['ts']
     cpu = point['cpuPercent']
@@ -42,5 +40,6 @@ def main():
             with psycopg.connect(url_database) as conn:
                 with conn.cursor() as cur:
                     save_server_history(cursor=cur,server_id=server["serverId"],history=history)
+
 if __name__ == "__main__":
     main()
